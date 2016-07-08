@@ -1,259 +1,271 @@
 ---
 layout: post
 published: true
-title: 『 Spark 』8. 实战案例 ｜ Spark 在金融领域的应用 ｜ 日内走势预测
-description: know more, do better 
+title: android产品研发-应用内跳转协议scheme
+description: 这里是文章描述
 ---  
 
-## 写在前面
+在讲解应用内跳转协议之前我们先讲解一下H5与Native相互跳转的相关知识点。现在越来越多的App采用了Native + H5方式开发，其中Native与H5页面如何交互？google提供了一个公共的方式：js与native互调，即js可以调用Native方法，Native同样也可以调用js方法；
 
-本系列是综合了自己在学习spark过程中的理解记录 ＋ 对参考文章中的一些理解 ＋ 个人实践spark过程中的一些心得而来。写这样一个系列仅仅是为了梳理个人学习spark的笔记记录，所以一切以能够理解为主，没有必要的细节就不会记录了，而且文中有时候会出现英文原版文档，只要不影响理解，都不翻译了。若想深入了解，最好阅读参考文章和官方文档。
+**但是这种交互方式存在着不少问题：**
+1、Java 调用 js 里面的函数、效率并不是很高、估计要200ms左右吧、做交互性很强的事情、这种速度很难让人接受、而js去调Java的方法、速度很快、50ms左右、所以尽量用js调用Java方法
+2、Java 调用 js 的函数、没有返回值、调用了就控制不到了
+3、Js 调用 Java 的方法、返回值如果是字符串、你会发现这个字符串是 native 的、转成 locale 的才能正常使用、使用 toLocaleString() 函数就可以了、不过这个函数的速度并不快、转化的字符串如果很多、将会很耗费时间
+4、网页中尽量不要使用jQuery、执行起来需要5-6秒、最好使用原生的js写业务脚本、以提升加载速度、改善用户体验
+5、android4.2以下的系统存在着webview的js对象注入漏洞...（不清楚的可以google）
 
-其次，本系列是基于目前最新的 spark 1.6.0 系列开始的，spark 目前的更新速度很快，记录一下版本好还是必要的。   
-最后，如果各位觉得内容有误，欢迎留言备注，所有留言 24 小时内必定回复，非常感谢。     
-Tips: 如果插图看起来不明显，可以：1. 放大网页；2. 新标签中打开图片，查看原图哦。
+基于这种种的原因，我们并未采用这种方式用于Native与webview交互，而是采用scheme + cookie的方式；
 
+这里的scheme是一种页面内跳转协议，主要用于支持一下几种场景：
 
-## 1. 同花顺收费版之走势预测
+- 服务器下发跳转路径，客户端根据服务器下发跳转路径跳转相应的页面；
 
-2014年后半年开始，国内 A 股市场可谓是热火朝天啊，路上的人谈的都是股票。小弟虽然就职金融互联网公司，但之前从来没有买过股票，但每天听着别人又赚了几套房几辆车，那叫一个心痒痒啊，那感觉，就跟一个出浴美女和你共处一室，但你却要死忍住不去掀开浴巾一样。终于，小弟还是"犯了全天下男人都会犯的错误"，还是在 2015.03.19 那天入市了，还记得自己的第一次是献给了一支叫 `天建集团` 的股票，好像当天还赚了一两百块吧，当时心情那叫一个激动，下班了第一时间就打电话给娘亲了。
+- H5页面点击锚点，根据锚点具体跳转路径App端跳转具体的页面；
 
-哦，似乎有点扯得远了。言归正传，当时自己为了投资更方便，就花了将近 300 大洋买了同花顺的 level 2 版，里面有个功能，叫做 `形态预测`。具体就是，根据所有股票的历史行情，看看当前股票的未来一段时间的走势分布。下面是一个截图：
+- App端收到服务器端下发的PUSH通知栏消息，根据消息的点击跳转路径跳转相关页面
 
-![spark-in-finance-1.jpg](../images/spark-in-finance-1.jpg)
+下面我将简单介绍一下scheme的基本概念以及以上三种场景下scheme的具体应用。
 
-截图说明：颜色越深，概率越大，包括一组预测的 k 线走势。就像上面说的，上面的那支股票的预测结果是：未来3周收益大于 4.0% 的概率有 60%。amazing...
+## URL scheme 概述
 
-先不说这个预测准确度有多高，但首先这个思路不错，至少可以作为一个信号吧［当然一个稳健的投资策略肯定不能仅仅依赖于一个信号］
+### URL scheme 的作用
 
+客户端应用可以向操作系统注册一个 URL scheme，该 scheme 用于从浏览器或其他应用中启动本应用。通过指定的 URL 字段，可以让应用在被调起后直接打开某些特定页面，比如车辆详情页、订单详情页、消息通知页、促销广告页等等。也可以执行某些指定动作，如订单支付等。也可以在应用内通过 html 页来直接调用显示 app 内的某个页面。
 
-## 2. 形态选股
+### URL scheme 的格式
 
-同花顺这个功能，其实也挺实用的，因为本身在股票市场技术指标这个分类下面，就有形态选股这样一种指标。比如说，经常听财经频道主持人说的 [三阳开泰](http://baike.baidu.com/item/%E4%B8%89%E9%98%B3%E5%BC%80%E6%B3%B0/18751451)，[圆弧底](http://baike.baidu.com/view/1302521.htm) 什么的。
+客户端自定义的 URL 作为从一个应用调用另一个的基础，遵循 RFC 1808 (Relative Uniform Resource Locators) 标准。这跟我们常见的网页内容 URL 格式一样。
 
-## 3. 指数日内相似度
+一个普通的 URL 分为几个部分，`scheme`、`host`、`relativePath`、`query`。
 
-今天，我们就来尝试一下，通过指数日内走势来进行宏观择时: 我们在早盘 11:00 时，使用当天上证指数的分时图，预测一下当天走势情况。
+比如：`http://www.baidu.com/s?rsv_bp=1&rsv_spt=1&wd=NSurl&inputT=2709`，这个URL中，`scheme` 为 `http`，`host` 为 `www.baidu.com`，`relativePath` 为 `/s`，`query` 为 `rsv_bp=1&rsv_spt=1&wd=NSurl&inputT=2709`。
 
-原理如下：使用上证指数历史分时数据，计算历史上每天 09:30 到 11:00 的分时段走势与今天早盘 09:30 到 11:00 走势的相似度。我们认为，相似度越高，则今日 11:00 到 15:00 走势和 15:00 的收盘涨跌，与历史当日的走势和收盘涨跌有较大的相似度。
-
-结果预览，如下图所示哦：
-
-![spark-in-finance-2.jpg](../images/spark-in-finance-2.jpg)
-
-
-## 4. spark 实现指数日内相似度
-
-同样，我们也用第三篇 [『 Spark 』3. spark 编程模式 ](../spark-programming-model) 讲到的三个步骤来实现这个简单的，但有实践意义的 spark 应用程序。
-
-备注：为了方便理解，我把这个例子精简过了，只用上证指数 6 年的分钟线数据，对应的相似度算法也是采用最简单的算法。但是不影响对整个应用框架的理解和扩展。
-
-### 4.1 加载数据集
-
-本文用到的数据集已经上传到百度云了，上传文件是一个压缩文件，解压缩后把整个文件夹上传到 hadoop 上就行了，文件夹里有 1505 个文件，文件名表示上证指数某日的分钟线行情，文件内容即为历史当日分钟线行情：
-
- ![spark-in-finance-3.jpg](../images/spark-in-finance-3.jpg)
-
-下载链接：[minute_bar.zip on baidu](http://pan.baidu.com/s/1jIvW4mU)
-
-下面，我们先创建 SparkContext，然后加载存放在 hdfs 上的数据。
-
-{% highlight python %}
-
-### 创建 sc
-try:
-    sc.stop()
-    sc = SparkContext(conf=sc_conf)
-except:
-    sc = SparkContext(conf=sc_conf)
-
-### 加载 hdfs 上的数据
-url = 'hdfs://10.21.208.21:8020/user/mercury/minute_bar'
-rdd_mkt_data = sc.wholeTextFiles(url, minPartitions=80) \
-                 .setName('index_minute_bar') \
-                 .cache()
-
-{% endhighlight %}
-
-### 4.2 处理数据
-
-- 指定要预测的分钟线
-
-{% highlight python %}
-
-### UDF 函数，从 rdd_mkt_data 获取某日历史分钟线行情数据
-def minute_bar_index(line_id):
-    line_data = rdd_mkt_data.filter(lambda x: line_id in x[0]).collect()
-    line = pd.DataFrame.from_dict(json.loads(line_data[0][1]))
-    line.sort(columns=['barTime'], ascending=True, inplace=True)
-    return line
-
-### 指定想要预测的线的 id，这里我们预测上证指数 2016.03.17 的分钟线
-target_line = '000001.ZICN-20160317'
-### 指定用于计算相似度的分钟线长度，这里我们用 90 个分钟 bar，
-### 即开盘 09:30 到 11:00 的分钟线
-minute_bar_length = 90
-minute_bar_length_share = sc.broadcast(minute_bar_length)
-target_line_mkt_data = minute_bar_index(target_line)
-target_line_share = sc.broadcast(target_line_mkt_data)
-
-{% endhighlight %}
-
-- 计算相似度
-
-{% highlight python %}
-
-### 相似度计算函数
-def cal_similarity(line):
-    """计算相似度
-    """
-    ### 使用 sklearn，pandas 来简化计算流程
-    import pandas as pd
-    import sklearn.preprocessing
-    scaler = sklearn.preprocessing.MinMaxScaler()
-    
-    ### 通过广播变量获取预测的目标线和准备用来预测的分钟线长度
-    minute_length = minute_bar_length_share.value
-    target_line = target_line_share.value
-    
-    ### 参数 line 的格式是： (line_id, line_data)
-    line_id, line_data = line
-    
-    ### 获取 pandas dataframe 格式的某日分钟线行情
-    ticker, tradeDate = line_id[-25:-5].split('-')
-    line_data = pd.DataFrame.from_dict(json.loads(line_data))
-    line_data.sort(columns=['barTime'], ascending=True, inplace=True)
-    
-    ### 每天有 240 条分钟线的 bar，我们用 前 minute_length 来计算相似度
-    line1 = list(target_line.ratio)[: minute_length]
-    line2 = list(line_data.ratio)[: minute_length]
-    
-    tmp = pd.DataFrame()    
-    tmp['first'], tmp['second'] = line1, line2
-    tmp['diff'] = tmp['first'] - tmp['second']
-    diff_square = sum(tmp['diff'] ** 2)
-
-    ### 返回格式：(分钟线id，该分钟线和目标线前 minute_length 个长度的相似度)
-    return (line_id[-25:-5], round(diff_square, 5))                
+一个应用中使用的 URL 例子（该 URL 会调起车辆详情页）：`uumobile://mobile/carDetail?car_id=123456`，其中 `scheme` 为 `uumobile`，`host` 为 `mobile`，`relativePath` 为 `/carDetail`，`query` 为 `car_id=123456`。
 
 
-### spark 相似度计算代码
-rdd_similarity = rdd_mkt_data.map(cal_similarity)\
-                             .setName('rdd_similarity') \
-                             .cache()
+###Scheme定义Activity
+1）在androidmanifest.xml中定义scheme
 
-{% endhighlight %}
+```
+<!-- scheme协议 -->
+        <activity
+            android:name=".UI.translate.NativeAppActivity"
+            android:label="@string/app_name">
 
+            <!-- 要想在别的App上能成功调起App，必须添加intent过滤器 -->
+            <intent-filter>
 
-### 4.3 结果展示
+                <!-- 协议部分，随便设置 -->
+                <data android:scheme="uumobile" />
+                <!-- 下面这几行也必须得设置 -->
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
 
-- 获取相似度高的分钟线
+                <action android:name="android.intent.action.VIEW" />
+            </intent-filter>
+        </activity>
+```
+这样我们便定义了能够接受scheme请求的activity实例，当网页或者是android代码发送这种规则scheme的请求的时候就能够吊起NativeAppActivity了。
 
-{% highlight python %}
+2）当然就是实现NativeAppActivity
 
-### UDF，从 rdd_mkt_data 里获取指定的多日分钟线数据
-def get_similary_line(similarity_data):
-    ### 获取原始相似的分钟线数据
-    rdd_lines = rdd_mkt_data.filter(
-        lambda x: x[0][-25:-5] in [i[0] for i in similarity_data]
-    ).collect()
-    ### 把原始分钟线数据转成 pandas dataframe 格式
-    similar_line = {
-        x[0][-25:-5]: pd.DataFrame.from_dict(json.loads(x[1])) 
-    for x in rdd_lines
+```
+/**
+ * Created by admin
+ */
+public class NativeAppActivity extends Activity{
+    public String tag = "NativeAppActivity";
+    public Activity mContext = null;
+
+    public void onCreate(Bundle b)
+    {
+        super.onCreate(b);
+        mContext = this;
+        Uri uri = getIntent().getData();
+        if (uri != null)
+        {
+            List<String> pathSegments = uri.getPathSegments();
+            String uriQuery = uri.getQuery();
+            Intent intent；
+            if (pathSegments != null && pathSegments.size() > 0) {
+                // 解析SCHEME
+                if (someif) {
+                  dosomething();
+                }
+                else {
+                    // 若解析不到SCHEME，则关闭NativeAppActivity；
+                    finish();
+                }
+            } else {
+                finish();
+            }
+        } else {
+            finish();
+        }
     }
-    similar_line = {
-        x: similar_line[x].sort(columns=['barTime'], ascending=True) 
-        for x in similar_line
+
+}
+```
+NativeAppActivity这个类中主要用于实现对scheme的解析，然后做出相应的动作，比如请求scheme跳转登录页面，我们可以这样定义
+
+```
+uumobile：//appname/gotoLogin
+```
+然后我们解析出scheme如果是这样的结构就跳转登录页面。。。
+
+这里简单说一下，我们可以通过Intent对象获取调用的scheme的host等信息
+
+```
+this.getIntent().getScheme();//获得Scheme名称  
+this.getIntent().getDataString();//获得Uri全部路径 
+```
+
+3）通过服务器下发跳转路径跳转相应页面
+
+```
+startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("uumobile://yongche/123123123")));
+```
+
+这里的"uumobile://yongche/123123123"就是服务器下发的跳转路径，当我们执行startActivity的时候就会调起NativeAppActivity，然后我们通过在NativeAppActivity解析scheme的内容，跳转相应的页面。
+
+4）通过在H5页面的锚点跳转相应的页面
+
+```
+@Override
+    public boolean shouldOverrideUrlLoading(WebView view, String url) {
+        //解析scheme
+        if (url.indexOf(H5Constant.SCHEME) != -1) {
+            try {
+                Uri uri = Uri.parse(url);
+                String[] urlSplit = url.split("\\?");
+                Map<String, String> queryMap = new HashMap<String, String>();
+                String h5Url = null;
+                if (urlSplit.length == 2) {
+                    queryMap = H5Constant.parseUriQuery(urlSplit[1]);
+                    h5Url = queryMap.get(H5Constant.MURL);
+                }
+                // 跳转NativeAppActivity解析
+                {
+                    // 若设置刷新，则刷新页面
+                    if (queryMap.containsKey(H5Constant.RELOADPRE) && "1".equals(queryMap.get(H5Constant.RELOADPRE))) {
+                        h5Fragment.isNeedFlushPreH5 = true;
+                    }
+                    Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+                    h5Activity.startActivityForResult(intent, H5Constant.h5RequestCode);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            return true;
+        }
+        // 打电话
+        else if (url.indexOf("tel://") != -1) {
+            final String number = url.substring("tel://".length());
+            Config.callPhoneByNumber(h5Activity, number);
+            return true;
+        } else if (url.indexOf("tel:") != -1) {
+            final String number = url.substring("tel:".length());
+            Config.callPhoneByNumber(h5Activity, number);
+            return true;
+        }
+        // 其他跳转方式
+        else {
+            view.loadUrl(url);
+            //如果不需要其他对点击链接事件的处理返回true，否则返回false
+            return false;
+        }
     }
-    
-    return similar_line
+```
+可以发现我们为Webview设置了WebViewClient，并重写了WebViewClient的shouldOverrideUrlLoading方法，然后我们解析锚点的url，并根据解析的内容调起NativeAppActivity的scheme Activity，然后在NativeAppActivity中解析scheme的内容并跳转相应的页面。
 
-### 获取相似度最高的30日分钟线
+5）根据服务器下发通知栏消息，App跳转相应的页面
 
-similarity_data = rdd_similarity.takeOrdered(30, key=lambda x: x[1])
-similar_line = get_similary_line(similarity_data)
+```
+public class NotificationActivity extends Activity {
 
-{% endhighlight %}
-
-- 根据相似分钟线绘制预测图
-
-{% highlight python %}
-
-def draw_similarity(target_line, minute_bar_length, similarity_data):
-    res = pd.DataFrame()
-    
-    columns = []
-    for i in similarity_data:
-        line_id = i[0]
-        line_data = similar_line[line_id]
-        res[line_id] = line_data.ratio
-        if 'minute' not in res :
-            res['minute'] = line_data.barTime  
-        columns.append(line_id)
-    res['fitting'] = res[columns].sum(axis=1) / len(columns)
-    res['target_line'] = target_line_mkt_data.ratio
-    
-    ### plot 
-    
-    ax = res.plot(x='minute', y=columns, figsize=(20, 13), 
-                  legend=False, title=u'Minute Bar Prediction')
-    res.plot(y=['target_line'], ax=ax, linewidth=5, style='.b')
-    res.plot(y=['fitting'], ax=ax, linewidth=4, style='-y')
-    ax.vlines(x=minute_bar_length, ymin=-0.02, ymax=0.02, 
-              linestyles='dashed')
-    ax.set_axis_bgcolor('white')
-    ax.grid(color='gray', alpha=0.2, axis='y')
-    
-    ### plot area
-    avg_line = res['fitting']
-    avg_line = list(avg_line)[minute_bar_length : ]
-    for line in columns:
-        predict_line = res[line]
-        predict_line = list(predict_line)[minute_bar_length : ]
-        ax.fill_between(range(minute_bar_length, 241), avg_line, 
-                        predict_line, alpha=0.1, color='r')
-    
-    return res, ax
-
-res, ax = draw_similarity(target_line, minute_bar_length, similarity_data)
-
-{% endhighlight %}
-
-![spark-in-finance-2.jpg](../images/spark-in-finance-2.jpg)
-
-## 5. Next
-
-这个例子还算 ok 吧，可是我每天都应用的投资策略的一部分啊，已经下血本了，各位还不打赏打赏吗？一转眼 spark 已经快要有十篇 blog 了，本来原计划第九篇是总结一些 spark 性能优化的 tips 的。可是前几天一个朋友突然问我是怎么开发 spark 应用程序的。我才恍然大悟，一下子写了这么多篇，都没有把搭建开发环境的经验写出来的呢。
-
-下一篇我就总结一下自己怎么搭建的一个 ipython + spark 的开发环境；不管各位有没有用过 ipython [notebook]，我都强烈推荐使用，使用它能打打提高你的开发效率和开发体验，你一定会爱上他的，相信我。
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        L.i("接收到通知点击事件...");
+        Intent realIntent = getIntent().getParcelableExtra(NotifeConstant.REAL_INTENT);
+        // 解析scheme并跳转
+        gotoRealScheme(this, realIntent);
+    }
 
 
-## 6. 打开微信，扫一扫，点一点，棒棒的，^_^
+    /**
+     * notification中跳转SCHEME，根据有效时间判断跳转URL地址
+     *  跳转之后更具网络请求判断用户当前状态
+     */
+    private void gotoRealScheme(Context context, Intent realIntent) {
+        if (realIntent == null || context == null) {
+            finish();
+            return;
+        }
+        try {
+            L.i("开始解析通知中的参数...");
+            long startShowTime = realIntent.getLongExtra(NotifeConstant.START_SHOW_TIME, 0);
+            // 有效期时间，单位:s（秒）
+            long validTime = realIntent.getLongExtra(NotifeConstant.VALID_TIME, 0);
+            long currentTime = System.currentTimeMillis();
+            String validActionUrl = realIntent.getStringExtra(NotifeConstant.VALID_ACTION_URL);
+            String invalidActionUrl = realIntent.getStringExtra(NotifeConstant.INVALID_ACTION_URL);
+            Intent schemeIntent;
+            L.i("开始根据URL构建Intent对象...");
+            if ((currentTime - startShowTime) / 1000L <= validTime) {
+                schemeIntent = H5Constant.buildSchemeFromUrl(validActionUrl);
+            } else {
+                schemeIntent = H5Constant.buildSchemeFromUrl(invalidActionUrl);
+            }
+            if (schemeIntent != null) {
+                // 设置当前页面为通知栏打开
+                Config.isNotificationOpen = true;
+                context.startActivity(schemeIntent);
+                finish();
+                //对通知栏点击事件统计
+                MobclickAgent.onEvent(context, UMCountConstant.PUSH_NOTIFICATION_CLICK);
+            } else {
+                finish();
+            }
+        } catch (Exception e) {
+            // 异常情况下退出当前Activity
+            finish();
+        }
+    }
+}
+```
+服务器下发的所有的通知都是先跳转这里的NotificationActivity，然后在这里执行跳转其他Activity的逻辑，而这里的H5Constant的buildSchemeFromUrl方法就是构造跳转页面Intent对象的，我们可以看一buildSchemeFromUrl方法的具体实现：
 
-![wechat_pay_6-6.png](../images/wechat_pay_6-6.png)
+```
+/**
+     * 从scheme的url中构建出Intent，用于界面跳转
+     *
+     * @param url
+     * @return
+     */
+    public static Intent buildSchemeFromUrl(String url) {
+        if (url != null && url.indexOf(H5Constant.SCHEME) != -1) {
+            Uri uri = Uri.parse(url);
+            String[] urlSplit = url.split("\\?");
+            Map<String, String> queryMap = new HashMap<String, String>();
+            String h5Url = null;
+            if (urlSplit.length == 2) {
+                queryMap = H5Constant.parseUriQuery(urlSplit[1]);
+                h5Url = queryMap.get(H5Constant.MURL);
+            }
+            Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+            if (!TextUtils.isEmpty(h5Url)) {
+                intent.putExtra(H5Constant.MURL, h5Url);
+            }
+            return intent;
+        }
+        return null;
+    }
+```
+这样我们就搞构造除了跳转NativeAppActivity的Intent对象，并将scheme字符串传递给了NativeAppActivity，这样在NativeAppActivity中就可以解析scheme字符串并执行相应的跳转逻辑了。
 
 
-## 参考文章
 
-- [Spark SQL, DataFrames and Datasets Guide](http://spark.apache.org/docs/latest/sql-programming-guide.html#dataframes)
-- [Introducing DataFrames in Spark for Large Scale Data Science](https://databricks.com/blog/2015/02/17/introducing-dataframes-in-spark-for-large-scale-data-science.html)
-- [From Webinar Apache Spark 1.5: What is the difference between a DataFrame and a RDD?](https://forums.databricks.com/questions/7257/from-webinar-spark-dataframes-what-is-the-differen-1.html)
-- [用Apache Spark进行大数据处理——第二部分：Spark SQL](http://www.infoq.com/cn/articles/apache-spark-sql)
-- [An introduction to JSON support in Spark SQL](https://databricks.com/blog/2015/02/02/an-introduction-to-json-support-in-spark-sql.html)
-- [Spark新年福音：一个用于大规模数据科学的API——DataFrame](http://www.csdn.net/article/2015-02-18/2823997)
-- [An introduction to JSON support in Spark SQL](https://databricks.com/blog/2015/02/02/an-introduction-to-json-support-in-spark-sql.html)
-
-
-## 本系列文章链接
-
-- [『 Spark 』1. spark 简介 ](http://litaotao.github.io/introduction-to-spark)
-- [『 Spark 』2. spark 基本概念解析 ](http://litaotao.github.io/spark-questions-concepts)
-- [『 Spark 』3. spark 编程模式 ](http://litaotao.github.io/spark-programming-model)
-- [『 Spark 』4. spark 之 RDD ](http://litaotao.github.io/spark-what-is-rdd)
-- [『 Spark 』5. 这些年，你不能错过的 spark 学习资源 ](http://litaotao.github.io/spark-resouces-blogs-paper)
-- [『 Spark 』6. 深入研究 spark 运行原理之 job, stage, task](http://litaotao.github.io/deep-into-spark-exection-model)
-- [『 Spark 』7. 使用 Spark DataFrame 进行大数据分析](http://litaotao.github.io/spark-dataframe-introduction)
-- [『 Spark 』8. 实战案例 ｜ Spark 在金融领域的应用 ｜ 日内走势预测](http://litaotao.github.io/spark-in-finance-and-investing)
-- [『 Spark 』9. 搭建 IPython + Notebook + Spark 开发环境](http://litaotao.github.io/ipython-notebook-spark)
-- [『 Spark 』10. spark 应用程序性能优化｜12 个优化方法](http://litaotao.github.io/boost-spark-application-performance)
+**总结：**
+android中的scheme是一种非常好的实现机制，通过定义自己的scheme协议，可以非常方便跳转app中的各个页面；
+通过scheme协议，服务器可以定制化告诉App跳转那个页面，可以通过通知栏消息定制化跳转页面，可以通过H5页面跳转页面等。
